@@ -172,7 +172,7 @@ def infer_on_stream(args, client):
     height = int(cap.get(4))
     # Prepare writing output video
     fourcc = cv2.VideoWriter_fourcc(*'MPEG')
-    out = cv2.VideoWriter(os.getcwd() + 'resources/output.mp4', fourcc, 24, (width,height))
+    out = cv2.VideoWriter(os.getcwd() + '/resources/output.mp4', fourcc, 24, (width,height))
 
     # Process frames until the video ends, or process is exited
     fCount = 0
@@ -180,6 +180,7 @@ def infer_on_stream(args, client):
     totalDuration = 0
     lastCount = 0
     lastBox = None
+    averageDuration = 0
     # rectangle of 5% height from right of the frame
     right_image = (int(0.95*width), 0, width,height)
     # rectangle of 5% height from bottom of the frame
@@ -221,6 +222,8 @@ def infer_on_stream(args, client):
                 client.publish("person/duration", json.dumps({"duration": averageDuration}))
                 lastCount = personInFrame
 
+            cv2.putText(frame, "Total={} Current={} Duration={}".format(totalPersonCounter, lastCount, averageDuration), (10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLOR_BB, 1)
             out.write(frame)
 
         # Send to ffmpeg server
