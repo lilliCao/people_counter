@@ -186,7 +186,7 @@ def infer_on_stream(args, client):
     # rectangle of 5% height from bottom of the frame
     bottom_image = (0, int(0.95*height), width, height)
 
-    print ("Starting..............................")
+    #print ("Starting..............................")
     while cap.isOpened():
         # Read the next frame
         flag, frame = cap.read()
@@ -207,7 +207,7 @@ def infer_on_stream(args, client):
             if personInFrame > lastCount and overlap(lastBox, bottom_image):
                 start_time = time.time()
                 totalPersonCounter = totalPersonCounter + personInFrame - lastCount
-                print ("Frame #{} total={} current={} People entered".format(fCount, totalPersonCounter, personInFrame))
+                #print ("Frame #{} total={} current={} People entered".format(fCount, totalPersonCounter, personInFrame))
                 # Publish new number of people in frame/total count
                 client.publish("person", json.dumps({"count": personInFrame}))
                 client.publish("person", json.dumps({"total": totalPersonCounter}))
@@ -216,8 +216,8 @@ def infer_on_stream(args, client):
                 duration = int(time.time() - start_time)
                 totalDuration = totalDuration + duration
                 averageDuration = int(totalDuration/totalPersonCounter)
-                print ("Frame #{} total={} current={} People left after {}s average={}"
-                    .format(fCount, totalPersonCounter, personInFrame, duration, averageDuration))
+                #print ("Frame #{} total={} current={} People left after {}s average={}"
+                #    .format(fCount, totalPersonCounter, personInFrame, duration, averageDuration))
                 # Publish new average duration after a person left
                 client.publish("person/duration", json.dumps({"duration": averageDuration}))
                 lastCount = personInFrame
@@ -239,7 +239,7 @@ def infer_on_stream(args, client):
     cap.release()
     cv2.destroyAllWindows()
     client.disconnect()
-    print ("Finished..............................")
+    #print ("Finished..............................")
     ### TODO: Write an output image if `single_image_mode` ###
 
 
