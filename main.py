@@ -26,6 +26,7 @@ import time
 import socket
 import json
 import cv2
+import numpy as np
 
 import logging as log
 import paho.mqtt.client as mqtt
@@ -40,6 +41,12 @@ MQTT_HOST = IPADDRESS
 MQTT_PORT = 3001
 MQTT_KEEPALIVE_INTERVAL = 60
 
+# classes from MobileNet
+CLASSES = ["background", "aeroplane", "bicycle", "bird", "boat",
+    "bottle", "bus", "car", "cat", "chair", "cow", "diningtable",
+    "dog", "horse", "motorbike", "person", "pottedplant", "sheep",
+    "sofa", "train", "tvmonitor"]
+COLOR_BB = (255, 0, 0)
 
 def build_argparser():
     """
@@ -62,18 +69,81 @@ def build_argparser():
                              "CPU, GPU, FPGA or MYRIAD is acceptable. Sample "
                              "will look for a suitable plugin for device "
                              "specified (CPU by default)")
-    parser.add_argument("-pt", "--prob_threshold", type=float, default=0.5,
+    parser.add_argument("-pt", "--prob_threshold", type=float, default=0.3,
                         help="Probability threshold for detections filtering"
-                        "(0.5 by default)")
+                        "(0.3 by default)")
     return parser
 
 
 def connect_mqtt():
-    ### TODO: Connect to the MQTT client ###
-    client = None
+    '''
+    Connect to mqtt server
+    '''
+    client = mqtt.Client()
+    client.connect(MQTT_HOST, MQTT_PORT, MQTT_KEEPALIVE_INTERVAL)
 
     return client
 
+def preprocessing(image, h, w):
+    '''
+    Preprocess the input frame to model input
+
+    :image : frame to process
+    :h : height of model input
+    :w : width of model input
+    :return prepo: the preprocessed frame to feed to the IE
+    '''
+    prepo = np.copy(image)
+    prepo = cv2.resize(prepo, (w, h))
+    prepo = prepo.transpose((2,0,1))
+    prepo = prepo.reshape(1, 3, h, w)
+    return prepo
+
+def postprocessing(image, output, height, width, confidence_threshold):
+    '''
+    Postprocess result from IE to get the person in frame and the detected bounding box
+
+    :image : frame to process
+    :output : output from IE
+    :height : frame height
+    :width : frame width
+    :confidence_threshold: threshold to filter bad detection results
+    :return personCounter: number of people in current frame
+            box: detected bounding box
+    '''
+    detections = output['detection_out']
+    personCounter = 0
+    box = None
+    for i in np.arange(0, detections.shape[2]):
+        confidence = detections[0, 0, i, 2]
+        # filter out weak detections by ensuring the `confidence` is
+        # greater than the minimum confidence
+        if confidence > confidence_threshold:
+            # extract the index of the class label from the `detections`,
+            # then compute the (x, y)-coordinates of the bounding box for
+            # the object
+            idx = int(detections[0, 0, i, 1])
+            box = detections[0, 0, i, 3:7] * np.array([width, height, width, height])
+            (startX, startY, endX, endY) = box.astype("int")
+
+            # display the prediction
+            classStr = CLASSES[idx]
+            if (classStr == "person"):
+                label = "{}: {:.2f}%".format(classStr, confidence * 100)
+                cv2.rectangle(image, (startX, startY), (endX, endY),
+                    COLOR_BB, 2)
+                y = startY - 15 if startY - 15 > 15 else startY + 15
+                cv2.putText(image, label, (startX, y),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLOR_BB, 2)
+                personCounter = personCounter + 1
+
+    return personCounter, box
+
+def overlap(rect1, rect2):
+    '''
+    Define if there is overlap between 2 rectangles
+    '''
+    return not (rect1[0] > rect2[2] or rect1[2] < rect2[0] or rect1[3] < rect2[1] or rect1[1] > rect2[3])
 
 def infer_on_stream(args, client):
     """
@@ -85,36 +155,89 @@ def infer_on_stream(args, client):
     :return: None
     """
     # Initialise the class
-    infer_network = Network()
+    inference_network = Network()
+
+    # Load the model and get input shape
+    n, c, h, w = inference_network.load_model(args.model, args.device, args.cpu_extension)
+
     # Set Probability threshold for detections
     prob_threshold = args.prob_threshold
 
-    ### TODO: Load the model through `infer_network` ###
+    # Handle input stream
+    # Get and open video capture
+    cap = cv2.VideoCapture(args.input)
+    cap.open(args.input)
+    # Grab the shape of input
+    width = int(cap.get(3))
+    height = int(cap.get(4))
+    # Prepare writing output video
+    fourcc = cv2.VideoWriter_fourcc(*'MPEG')
+    out = cv2.VideoWriter(os.getcwd() + 'resources/output.mp4', fourcc, 24, (width,height))
 
-    ### TODO: Handle the input stream ###
+    # Process frames until the video ends, or process is exited
+    fCount = 0
+    totalPersonCounter = 0
+    totalDuration = 0
+    lastCount = 0
+    lastBox = None
+    # rectangle of 5% height from right of the frame
+    right_image = (int(0.95*width), 0, width,height)
+    # rectangle of 5% height from bottom of the frame
+    bottom_image = (0, int(0.95*height), width, height)
 
-    ### TODO: Loop until stream is over ###
+    print ("Starting..............................")
+    while cap.isOpened():
+        # Read the next frame
+        flag, frame = cap.read()
+        if not flag:
+            break
+        key_pressed = cv2.waitKey(60)
 
-        ### TODO: Read from the video capture ###
+        fCount = fCount + 1
 
-        ### TODO: Pre-process the image as needed ###
+        prepo = preprocessing(frame, h, w)
+        inference_network.async_inference(prepo)
 
-        ### TODO: Start asynchronous inference for specified request ###
+        if inference_network.wait() == 0:
+            result = inference_network.get_output()
+            personInFrame, box = postprocessing(frame, result, height, width, prob_threshold)
+            if box is not None:
+                lastBox = box
+            if personInFrame > lastCount and overlap(lastBox, bottom_image):
+                start_time = time.time()
+                totalPersonCounter = totalPersonCounter + personInFrame - lastCount
+                print ("Frame #{} total={} current={} People entered".format(fCount, totalPersonCounter, personInFrame))
+                # Publish new number of people in frame/total count
+                client.publish("person", json.dumps({"count": personInFrame}))
+                client.publish("person", json.dumps({"total": totalPersonCounter}))
+                lastCount = personInFrame
+            elif personInFrame < lastCount and overlap(lastBox, right_image):
+                duration = int(time.time() - start_time)
+                totalDuration = totalDuration + duration
+                averageDuration = int(totalDuration/totalPersonCounter)
+                print ("Frame #{} total={} current={} People left after {}s average={}"
+                    .format(fCount, totalPersonCounter, personInFrame, duration, averageDuration))
+                # Publish new average duration after a person left
+                client.publish("person/duration", json.dumps({"duration": averageDuration}))
+                lastCount = personInFrame
 
-        ### TODO: Wait for the result ###
+            out.write(frame)
 
-            ### TODO: Get the results of the inference request ###
+        # Send to ffmpeg server
+        sys.stdout.buffer.write(frame)
+        sys.stdout.flush()
 
-            ### TODO: Extract any desired stats from the results ###
+        # Break if escape key pressed
+        if key_pressed == 27:
+            break
 
-            ### TODO: Calculate and send relevant information on ###
-            ### current_count, total_count and duration to the MQTT server ###
-            ### Topic "person": keys of "count" and "total" ###
-            ### Topic "person/duration": key of "duration" ###
-
-        ### TODO: Send the frame to the FFMPEG server ###
-
-        ### TODO: Write an output image if `single_image_mode` ###
+    # Release the out writer, capture, and destroy any OpenCV windows
+    out.release()
+    cap.release()
+    cv2.destroyAllWindows()
+    client.disconnect()
+    print ("Finished..............................")
+    ### TODO: Write an output image if `single_image_mode` ###
 
 
 def main():
