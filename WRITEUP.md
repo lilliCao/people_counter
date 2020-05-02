@@ -17,11 +17,18 @@ sudo ./mo.py --input_model <path to MobileNetSSD_deploy.caffemodel>
 
 Counting people is done by detecting enter and leave action. The naive solution relies on the fact that there is always max 1 person on frame and the person is always entering from the bottom and leaving from the right. Enter action is detected when the personInFrame is bigger than lastCount and there is overlap between the bounding box and 5%-bottom-image. Leave action is analog detected when the personInFrame is smaller than lastCount and there is overlap between the bounding box and 5%-right-image
 
+The average duration is interpreted as the average duration of **all people** who enter and leave the screen. This number is updated every time a person leaves the screen and sent to the mqtt server.
+
+
 ## Explaining Custom Layers
 
-There is no custom layers in my pre-trained model.
+There are these following unsupported layers found: ['conv17_2_mbox_priorbox', 'conv16_2_mbox_priorbox', 'conv15_2_mbox_priorbox', 'conv14_2_mbox_priorbox', 'conv13_mbox_priorbox', 'conv11_mbox_priorbox', 'detection_out']. -> Adding an available CPU extension with
 
-However, handling custom layers is in general a very important step. Openvino tool kit by default only supports a list of layers, which also called "supported layers". There are also supported layers specific by hardware. The layers outside of this list is considered as "custom layers". By default, the inference engine will report an error while loading trained model containing those "custom layers". Handling those custom layers will help using your model successfully and optimizedly.
+```console
+-l /opt/intel/openvino/deployment_tools/inference_engine/lib/intel64/libcpu_extension_sse4.so
+```
+
+Handling custom layers is in general a very important step. Openvino tool kit by default only supports a list of layers, which also called "supported layers". There are also supported layers specific by hardware. The layers outside of this list is considered as "custom layers". By default, the inference engine will report an error while loading trained model containing those "custom layers". Handling those custom layers will help using your model successfully and optimizedly.
 
 ## Comparing Model Performance
 
