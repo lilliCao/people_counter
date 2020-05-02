@@ -48,6 +48,9 @@ CLASSES = ["background", "aeroplane", "bicycle", "bird", "boat",
     "sofa", "train", "tvmonitor"]
 COLOR_BB = (255, 0, 0)
 
+# supported image format
+SUPPORTED_FORMAT = [".jpg", ".bmp", ".jpeg", ".png"]
+
 def build_argparser():
     """
     Parse command line arguments.
@@ -58,7 +61,7 @@ def build_argparser():
     parser.add_argument("-m", "--model", required=True, type=str,
                         help="Path to an xml file with a trained model.")
     parser.add_argument("-i", "--input", required=True, type=str,
-                        help="Path to image or video file")
+                        help="Path to image or video file or CAM if using camera")
     parser.add_argument("-l", "--cpu_extension", required=False, type=str,
                         default=None,
                         help="MKLDNN (CPU)-targeted custom layers."
@@ -84,6 +87,15 @@ def connect_mqtt():
 
     return client
 
+def support_image_format(image):
+    '''
+    Check if the given input image format is supported
+    '''
+    for f in SUPPORTED_FORMAT:
+        if image.endswith(f):
+            return True
+    return False
+
 def preprocessing(image, h, w):
     '''
     Preprocess the input frame to model input
@@ -99,7 +111,7 @@ def preprocessing(image, h, w):
     prepo = prepo.reshape(1, 3, h, w)
     return prepo
 
-def postprocessing(image, output, height, width, confidence_threshold):
+def postprocessing(image_in, output, height, width, confidence_threshold):
     '''
     Postprocess result from IE to get the person in frame and the detected bounding box
 
@@ -108,9 +120,11 @@ def postprocessing(image, output, height, width, confidence_threshold):
     :height : frame height
     :width : frame width
     :confidence_threshold: threshold to filter bad detection results
-    :return personCounter: number of people in current frame
+    :return image: frame with detected bounding box
+            personCounter: number of people in current frame
             box: detected bounding box
     '''
+    image = np.copy(image_in)
     detections = output['detection_out']
     personCounter = 0
     box = None
@@ -129,7 +143,7 @@ def postprocessing(image, output, height, width, confidence_threshold):
             # display the prediction
             classStr = CLASSES[idx]
             if (classStr == "person"):
-                label = "{}: {:.2f}%".format(classStr, confidence * 100)
+                label = "{:.2f}%".format(confidence * 100)
                 cv2.rectangle(image, (startX, startY), (endX, endY),
                     COLOR_BB, 2)
                 y = startY - 15 if startY - 15 > 15 else startY + 15
@@ -137,7 +151,7 @@ def postprocessing(image, output, height, width, confidence_threshold):
                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLOR_BB, 2)
                 personCounter = personCounter + 1
 
-    return personCounter, box
+    return image, personCounter, box
 
 def overlap(rect1, rect2):
     '''
@@ -154,25 +168,35 @@ def infer_on_stream(args, client):
     :param client: MQTT client
     :return: None
     """
-    # Initialise the class
+    # Initialise the class, load the model and get input shape
     inference_network = Network()
-
-    # Load the model and get input shape
     n, c, h, w = inference_network.load_model(args.model, args.device, args.cpu_extension)
 
     # Set Probability threshold for detections
     prob_threshold = args.prob_threshold
 
     # Handle input stream
-    # Get and open video capture
+    # Get and open video capture and check if input is image or video or camera
+    image_flag = False
+    if args.input == 'CAM':
+        args.input = 0
+    elif support_image_format(args.input):
+        image_flag = True
+    else:
+        print ("Unsupported input! Please enter an image, a video or use camera")
+        exit(1)
+
     cap = cv2.VideoCapture(args.input)
     cap.open(args.input)
     # Grab the shape of input
     width = int(cap.get(3))
     height = int(cap.get(4))
+
     # Prepare writing output video
-    fourcc = cv2.VideoWriter_fourcc(*'MPEG')
-    out = cv2.VideoWriter(os.getcwd() + '/resources/output.mp4', fourcc, 24, (width,height))
+    # ATTENTION (only for test, if piping with ffmpeg, please comment these following lines out to prevent broken stdout format)
+    if not image_flag:
+        fourcc = cv2.VideoWriter_fourcc(*'MPEG')
+        out = cv2.VideoWriter(os.getcwd() + '/resources/output.mp4', fourcc, 24, (width,height))
 
     # Process frames until the video ends, or process is exited
     fCount = 0
@@ -201,47 +225,56 @@ def infer_on_stream(args, client):
 
         if inference_network.wait() == 0:
             result = inference_network.get_output()
-            personInFrame, box = postprocessing(frame, result, height, width, prob_threshold)
-            if box is not None:
-                lastBox = box
-            if personInFrame > lastCount and overlap(lastBox, bottom_image):
-                start_time = time.time()
-                totalPersonCounter = totalPersonCounter + personInFrame - lastCount
-                #print ("Frame #{} total={} current={} People entered".format(fCount, totalPersonCounter, personInFrame))
-                # Publish new number of people in frame/total count
-                client.publish("person", json.dumps({"count": personInFrame}))
-                client.publish("person", json.dumps({"total": totalPersonCounter}))
-                lastCount = personInFrame
-            elif personInFrame < lastCount and overlap(lastBox, right_image):
-                duration = int(time.time() - start_time)
-                totalDuration = totalDuration + duration
-                averageDuration = int(totalDuration/totalPersonCounter)
-                #print ("Frame #{} total={} current={} People left after {}s average={}"
-                #    .format(fCount, totalPersonCounter, personInFrame, duration, averageDuration))
-                # Publish new average duration after a person left
-                client.publish("person/duration", json.dumps({"duration": averageDuration}))
-                lastCount = personInFrame
-
-            cv2.putText(frame, "Total={} Current={} Duration={}".format(totalPersonCounter, lastCount, averageDuration), (10, 30),
+            frame_out, personInFrame, box = postprocessing(frame, result, height, width, prob_threshold)
+            if image_flag:
+                # handle image
+                cv2.putText(frame_out,"People in image={}".format(personInFrame), (10, 30),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLOR_BB, 1)
-            out.write(frame)
+                # ATTENTION (only for test, if piping with ffmpeg, please comment these following lines out to prevent broken stdout format)
+                #cv2.imwrite(os.getcwd() + '/resources/output.jpg',frame_out)
+            else:
+                # handle stream
+                if box is not None:
+                    lastBox = box
+                if personInFrame > lastCount and overlap(lastBox, bottom_image):
+                    start_time = time.time()
+                    totalPersonCounter = totalPersonCounter + personInFrame - lastCount
+                    #print ("Frame #{} total={} current={} People entered".format(fCount, totalPersonCounter, personInFrame))
+                    # Publish new number of people in frame/total count
+                    client.publish("person", json.dumps({"count": personInFrame}))
+                    client.publish("person", json.dumps({"total": totalPersonCounter}))
+                    lastCount = personInFrame
+                elif personInFrame < lastCount and overlap(lastBox, right_image):
+                    duration = int(time.time() - start_time)
+                    totalDuration = totalDuration + duration
+                    averageDuration = int(totalDuration/totalPersonCounter)
+                    #print ("Frame #{} total={} current={} People left after {}s average={}"
+                    #    .format(fCount, totalPersonCounter, personInFrame, duration, averageDuration))
+                    # Publish new average duration after a person left
+                    client.publish("person/duration", json.dumps({"duration": averageDuration}))
+                    lastCount = personInFrame
 
-        # Send to ffmpeg server
-        sys.stdout.buffer.write(frame)
-        sys.stdout.flush()
+                cv2.putText(frame_out, "Total={} Current={} Duration={}".format(totalPersonCounter, lastCount, averageDuration), (10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLOR_BB, 1)
+
+                # ATTENTION (only for test, if piping with ffmpeg, please comment these following lines out to prevent broken stdout format)
+                #out.write(frame_out)
+
+            # Send to ffmpeg server
+            sys.stdout.buffer.write(frame_out)
+            sys.stdout.flush()
 
         # Break if escape key pressed
         if key_pressed == 27:
             break
 
     # Release the out writer, capture, and destroy any OpenCV windows
-    out.release()
+    if not image_flag:
+        out.release()
     cap.release()
     cv2.destroyAllWindows()
     client.disconnect()
     #print ("Finished..............................")
-    ### TODO: Write an output image if `single_image_mode` ###
-
 
 def main():
     """

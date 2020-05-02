@@ -51,14 +51,21 @@ class Network:
         # Initalize the plugin
         self.plugin = IECore()
 
-        ### TODO: Check for supported layers ###
-
         # Add an extension if given
         if cpu_extension and "CPU" in device:
             self.plugin.add_extension(cpu_extension, device)
 
         # Read IR into IENetwork
         network = IENetwork(model=model_xml, weights=model_bin)
+
+        # Check for any unsupported layers, and let the user
+        # know if anything is missing. Exit the program, if so
+        supported_layers = self.plugin.query_network(network=network, device_name=device)
+        unsupported_layers = [l for l in network.layers.keys() if l not in supported_layers]
+        if len(unsupported_layers) != 0:
+            print("Unsupported layers found: {}".format(unsupported_layers))
+            print("Check whether extensions are available to add to IECore.")
+            exit(1)
 
         # Load IENetwork into the plugin
         self.exec_network = self.plugin.load_network(network, device)
@@ -76,21 +83,21 @@ class Network:
         self.exec_network.infer({self.input_blob: image})
         return
 
-    def async_inference(self, image):
+    def async_inference(self, image, idx=0):
         '''
         Make a asynchronous inference request
         '''
-        self.exec_network.start_async(request_id=0, inputs={self.input_blob: image})
+        self.exec_network.start_async(request_id=idx, inputs={self.input_blob: image})
         return
 
-    def wait(self):
+    def wait(self, idx=0):
         '''
         Wait for an asynchronous request to be finished
         '''
-        return self.exec_network.requests[0].wait(-1)
+        return self.exec_network.requests[idx].wait(-1)
 
-    def get_output(self):
+    def get_output(self, idx=0):
         '''
         Get output from the IE
         '''
-        return self.exec_network.requests[0].outputs
+        return self.exec_network.requests[idx].outputs
