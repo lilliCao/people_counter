@@ -48,8 +48,9 @@ CLASSES = ["background", "aeroplane", "bicycle", "bird", "boat",
     "sofa", "train", "tvmonitor"]
 COLOR_BB = (255, 0, 0)
 
-# supported image format
+# supported image/video format
 SUPPORTED_FORMAT = [".jpg", ".bmp", ".jpeg", ".png"]
+SUPPORTED_VIDEO_FORMAT = [".mp4"]
 
 def build_argparser():
     """
@@ -93,6 +94,15 @@ def support_image_format(image):
     '''
     for f in SUPPORTED_FORMAT:
         if image.endswith(f):
+            return True
+    return False
+
+def support_video_format(video):
+    '''
+    Check if the given input image format is supported
+    '''
+    for v in SUPPORTED_VIDEO_FORMAT:
+        if video.endswith(v):
             return True
     return False
 
@@ -182,7 +192,7 @@ def infer_on_stream(args, client):
         args.input = 0
     elif support_image_format(args.input):
         image_flag = True
-    else:
+    elif not support_video_format(args.input):
         print ("Unsupported input! Please enter an image, a video or use camera")
         exit(1)
 
@@ -194,9 +204,9 @@ def infer_on_stream(args, client):
 
     # Prepare writing output video
     # ATTENTION (only for test, if piping with ffmpeg, please comment these following lines out to prevent broken stdout format)
-    if not image_flag:
-        fourcc = cv2.VideoWriter_fourcc(*'MPEG')
-        out = cv2.VideoWriter(os.getcwd() + '/resources/output.mp4', fourcc, 24, (width,height))
+    #if not image_flag:
+    #   fourcc = cv2.VideoWriter_fourcc(*'MPEG')
+    #    out = cv2.VideoWriter(os.getcwd() + '/resources/output.mp4', fourcc, 24, (width,height))
 
     # Process frames until the video ends, or process is exited
     fCount = 0
@@ -230,8 +240,8 @@ def infer_on_stream(args, client):
                 # handle image
                 cv2.putText(frame_out,"People in image={}".format(personInFrame), (10, 30),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLOR_BB, 1)
-                # ATTENTION (only for test, if piping with ffmpeg, please comment these following lines out to prevent broken stdout format)
-                #cv2.imwrite(os.getcwd() + '/resources/output.jpg',frame_out)
+                cv2.imwrite(os.getcwd() + '/resources/output.jpg',frame_out)
+                break
             else:
                 # handle stream
                 if box is not None:
