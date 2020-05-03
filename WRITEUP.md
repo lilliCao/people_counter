@@ -4,7 +4,8 @@
 
 * Converting model ([MobileNetSSD](https://www.pyimagesearch.com/2017/09/11/object-detection-with-deep-learning-and-opencv/))
 
-The downloaded as well as optimized model can be found in /models
+The downloaded as well as optimized model can be found in /models, as well as the converted model in the workspace can be found in /models/models_converted_in_workspace
+
 ```console
 cd /opt/intel/openvino/deployment_tools/model_optimizers/
 
