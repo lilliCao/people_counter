@@ -4,7 +4,7 @@
 
 * Converting model ([MobileNetSSD](https://www.pyimagesearch.com/2017/09/11/object-detection-with-deep-learning-and-opencv/))
 
-The downloaded as well as optimized model can be found in /models, as well as the converted model in the workspace can be found in /models/models_converted_in_workspace
+The downloaded as well as optimized model can be found in **/models**, as well as the converted model in the workspace can be found in **/models/models_converted_in_workspace**
 
 ```console
 cd /opt/intel/openvino/deployment_tools/model_optimizers/
@@ -12,6 +12,16 @@ cd /opt/intel/openvino/deployment_tools/model_optimizers/
 sudo ./mo.py --input_model <path to MobileNetSSD_deploy.caffemodel>
 --input_proto <path to MobileNetSSD_deploy.prototxt> -o <output folder>
 --mean_values [127.5,127.5,127.5] --scale_values [127.5]
+```
+
+* Running the application
+Please follow the instruction in workspace to get the mqtt server, ffmpeg and ui running. The application then can be run by the following command. The confidence_threshold is set to 0.3 by default in code. There are some adjustment for the application to run in local in server.conf as described in workspace. Otherwise there are only 3 files, which is changed by me: main.py, inference.py and WRITEUP.md
+
+```console
+python main.py -i resources/Pedestrian_Detect_2_1_1.mp4
+-m models/MobileNetSSD_deploy.xml
+-l /opt/intel/openvino/deployment_tools/inference_engine/lib/intel64/libcpu_extension_sse4.so
+| ffmpeg -v warning -f rawvideo -pixel_format bgr24 -video_size 768x432 -framerate 24 -i - http://0.0.0.0:3004/fac.ffm
 ```
 
 * Counting logic
