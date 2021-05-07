@@ -1,3 +1,4 @@
+# Intel® Edge AI for IoT Developers Nanodegree Program by [Udacity and Intel](https://www.udacity.com/course/intel-edge-ai-for-iot-developers-nanodegree--nd131)
 # Deploy a People Counter App at the Edge
 
 | Details            |              |
